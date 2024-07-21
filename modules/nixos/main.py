@@ -54,15 +54,6 @@ cfgbootnone = """  # Disable bootloader.
 
 """
 
-cfgbootgrubcrypt = """  # Setup keyfile
-  boot.initrd.secrets = {
-    "/crypto_keyfile.bin" = null;
-  };
-
-  boot.loader.grub.enableCryptodisk=true;
-
-"""
-
 cfgnetwork = """  networking.hostName = "@@hostname@@"; # Define your hostname.
   # networking.wireless.enable = true;  # Enables wireless support via wpa_supplicant.
 
@@ -393,41 +384,6 @@ def run():
         if part["claimed"] == True and (part["fsName"] == "luks" or part["fsName"] == "luks2") and part["device"] is not None and part["fs"] == "linuxswap":
             cfg += """  boot.initrd.luks.devices."{}".device = "/dev/disk/by-uuid/{}";\n""".format(
                 part["luksMapperName"], part["uuid"])
-
-    # Check partitions
-    for part in gs.value("partitions"):
-        if part["claimed"] == True and (part["fsName"] == "luks" or part["fsName"] == "luks2") and fw_type != "efi":
-            cfg += cfgbootgrubcrypt
-            status = _("Setting up LUKS")
-            libcalamares.job.setprogress(0.15)
-            try:
-                # Create /crypto_keyfile.bin
-                libcalamares.utils.host_env_process_output(
-                    ["dd", "bs=512", "count=4", "if=/dev/random", "of="+root_mount_point+"/crypto_keyfile.bin", "iflag=fullblock"], None)
-                libcalamares.utils.host_env_process_output(
-                    ["chmod", "600", root_mount_point+"/crypto_keyfile.bin"], None)
-
-            except subprocess.CalledProcessError:
-                libcalamares.utils.error(
-                    "Failed to create /crypto_keyfile.bin")
-                return (_("Failed to create /crypto_keyfile.bin"), _("Check if you have enough free space on your partition."))
-            break
-
-    # Setup keys in /crypto_keyfile if using BIOS and Grub cryptodisk
-    for part in gs.value("partitions"):
-        if part["claimed"] == True and (part["fsName"] == "luks" or part["fsName"] == "luks2") and part["device"] is not None and fw_type != "efi":
-            cfg += """  boot.initrd.luks.devices."{}".keyFile = "/crypto_keyfile.bin";\n""".format(part["luksMapperName"])
-            try:
-                # Grub currently only supports pbkdf2 for luks2
-                libcalamares.utils.host_env_process_output(
-                    ["cryptsetup", "luksConvertKey", "--hash", "sha256", "--pbkdf", "pbkdf2", part["device"]], None, part["luksPassphrase"])
-                # Add luks drives to /crypto_keyfile.bin
-                libcalamares.utils.host_env_process_output(
-                    ["cryptsetup", "luksAddKey", "--hash", "sha256", "--pbkdf", "pbkdf2", part["device"], root_mount_point+"/crypto_keyfile.bin"], None, part["luksPassphrase"])
-            except subprocess.CalledProcessError:
-                libcalamares.utils.error(
-                    "Failed to add {} to /crypto_keyfile.bin".format(part["luksMapperName"]))
-                return (_("cryptsetup failed"), _("Failed to add {} to /crypto_keyfile.bin".format(part["luksMapperName"])))
 
     status = _("Configuring NixOS")
     libcalamares.job.setprogress(0.18)
